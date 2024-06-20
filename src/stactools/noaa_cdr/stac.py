@@ -1,15 +1,14 @@
 import logging
-
-# from typing import Any, Dict, List, Optional, Union
-#
-# import numpy as np
-# import rasterio
-# from dateutil.parser import isoparse
 from datetime import datetime, timezone
+from typing import Any
 
-import stactools.core.create
+import fsspec
+import xarray as xr
+import xstac
+
+# import stactools.core.create
 from pystac import (
-    # Asset,
+    Asset,
     Collection,
     Extent,
     Item,
@@ -26,14 +25,10 @@ from pystac import (
 #
 from . import constants  # , cog
 
-# from .fileinfo import FileInfo
-
 logger = logging.getLogger(__name__)
 
 
-def create_collection(
-    # region: str,
-) -> Collection:
+def create_collection() -> Collection:
     """Creates a STAC Collection for NOAA Climate Data Record.
 
     Args:
@@ -68,33 +63,61 @@ def create_collection(
         license="proprietary",
         providers=constants.PROVIDERS,
     )
+
+    collection.add_link(constants.LINK_CDR_HOME)
+
     return collection
 
 
-def create_item(asset_href: str) -> Item:
-    """Creates a STAC item from a raster asset.
-
-    This example function uses :py:func:`stactools.core.utils.create_item` to
-    generate an example item.  Datasets should customize the item with
-    dataset-specific information, e.g.  extracted from metadata files.
-
-    See `the STAC specification
-    <https://github.com/radiantearth/stac-spec/blob/master/item-spec/item-spec.md>`_
-    for information about an item's fields, and
-    `Item<https://pystac.readthedocs.io/en/latest/api/pystac.html#pystac.Item>`_ for
-    information on the PySTAC class.
-
-    This function should be updated to take all hrefs needed to build the item.
-    It is an anti-pattern to assume that related files (e.g. metadata) are in
-    the same directory as the primary file.
-
-    Args:
-        asset_href (str): The HREF pointing to an asset associated with the item
+def create_item(
+    ds: xr.Dataset, xarray_to_stac_options: dict[str, Any] | None = None
+) -> Any:
+    """Creates a STAC item from an xarray dataset.
 
     Returns:
         Item: STAC Item object
     """
-    item = stactools.core.create.item(asset_href)
-    item.id = "example-item"
-    item.properties["custom_attribute"] = "foo"
+    url = "https://noaadata.apps.nsidc.org/NOAA/G02202_V4/north/aggregate"
+    fs = fsspec.filesystem("https")  # , host=host)
+    files = [f for f in fs.find(url) if f.endswith(".nc") and "monthly" in f]
+    file = files[0]
+    ds = xr.open_dataset(ds=xr.open_dataset(file))
+
+    item_id = "seaice-concentration-north-monthly-v4"
+
+    template = Item(
+        "item",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [180.0, -90.0],
+                    [180.0, 90.0],
+                    [-180.0, 90.0],
+                    [-180.0, -90.0],
+                    [180.0, -90.0],
+                ]
+            ],
+        },
+        bbox=[31.1, -180, 89.4, 180],
+        datetime=None,
+        properties={"start_datetime": None, "end_datetime": None},
+        href=file,
+    )
+
+    xarray_to_stac_options = xarray_to_stac_options or {}
+    xarray_to_stac_options.setdefault("reference_system", 4326)
+    xarray_to_stac_options.setdefault("template", template)
+    item = xstac.xarray_to_stac(ds, **xarray_to_stac_options)
+    item.id = item_id
+
+    # key = asset_key(file)
+    asset = Asset(
+        file,
+        media_type="application/netcdf",
+        roles=["data"],
+    )
+
+    item.add_asset(asset)
+
     return item
