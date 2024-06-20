@@ -1,39 +1,72 @@
+import logging
+
+# from typing import Any, Dict, List, Optional, Union
+#
+# import numpy as np
+# import rasterio
+# from dateutil.parser import isoparse
 from datetime import datetime, timezone
 
 import stactools.core.create
 from pystac import (
+    # Asset,
     Collection,
     Extent,
     Item,
+    # MediaType,
     SpatialExtent,
+    # Summaries,
     TemporalExtent,
 )
 
+#
+# from pystac.extensions.item_assets import AssetDefinition, ItemAssetsExtension
+# from pystac.extensions.projection import ProjectionExtension
+# from pystac.extensions.raster import DataType
+#
+from . import constants  # , cog
 
-def create_collection() -> Collection:
-    """Creates a STAC Collection.
+# from .fileinfo import FileInfo
 
-    This function should create a collection for this dataset. See `the STAC
-    specification
-    <https://github.com/radiantearth/stac-spec/blob/master/collection-spec/collection-spec.md>`_
-    for information about collection fields, and
-    `Collection<https://pystac.readthedocs.io/en/latest/api.html#collection>`_
-    for information about the PySTAC class.
+logger = logging.getLogger(__name__)
+
+
+def create_collection(
+    # region: str,
+) -> Collection:
+    """Creates a STAC Collection for NOAA Climate Data Record.
+
+    Args:
+        region (str): The region of the files, North or South.
 
     Returns:
         Collection: STAC Collection object
     """
+    spatial_extents = list(constants.EXTENTS.values())
     extent = Extent(
-        SpatialExtent([[-180.0, 90.0, 180.0, -90.0]]),
+        SpatialExtent(spatial_extents),
         TemporalExtent([[datetime.now(tz=timezone.utc), None]]),
     )
 
+    keywords = [
+        "EARTH SCIENCE",
+        "CRYOSPHERE",
+        "SEA ICE",
+        "SEA ICE CONCENTRATION",
+        "Polar",
+    ]
+
     collection = Collection(
-        id="example-collection",
-        title="Example collection",
-        description="An example collection",
+        id="seaiceClimateDataRecord-collection",
+        title="NOAA Seaice Climate Data Record collection",
+        description=(
+            "NOAA/NSIDC Climate Data Record of Passive"
+            " Microwave Sea Ice Concentration Version 4"
+        ),
         extent=extent,
-        extra_fields={"custom_attribute": "foo"},
+        keywords=keywords,
+        license="proprietary",
+        providers=constants.PROVIDERS,
     )
     return collection
 
