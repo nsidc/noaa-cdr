@@ -7,7 +7,7 @@
 - Package: `stactools.noaa_cdr`
 - [stactools-noaa-cdr on PyPI](https://pypi.org/project/stactools-noaa-cdr/)
 - Owner: @githubusername
-- [Dataset homepage](http://example.com)
+- [Dataset homepage](https://nsidc.org/data/g02202/versions/4)
 - STAC extensions used:
   - [proj](https://github.com/stac-extensions/projection/)
 - Extra fields:
@@ -15,7 +15,8 @@
 - [Browse the example in human-readable form](https://radiantearth.github.io/stac-browser/#/external/raw.githubusercontent.com/stactools-packages/noaa-cdr/main/examples/collection.json)
 - [Browse a notebook demonstrating the example item and collection](https://github.com/stactools-packages/noaa-cdr/tree/main/docs/example.ipynb)
 
-A short description of the package and its usage.
+A stactools package for NOAA's Climate Data Record (cdr) dataset.
+ This package can generate items from NetCDF's.
 
 ## STAC examples
 
@@ -32,8 +33,10 @@ pip install stactools-noaa-cdr
 
 Description of the command line functions
 
+Create collection
+
 ```shell
-stac noaa-cdr create-item source destination
+stac noaa-cdr sea-ice-concentration create-collection destination
 ```
 
 Use `stac noaa-cdr --help` to see all subcommands and options.
