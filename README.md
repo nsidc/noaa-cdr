@@ -6,7 +6,7 @@
 - Name: noaa-cdr
 - Package: `stactools.noaa_cdr`
 - [stactools-noaa-cdr on PyPI](https://pypi.org/project/stactools-noaa-cdr/)
-- Owner: @githubusername
+- Owner: @rmarow
 - [Dataset homepage](https://nsidc.org/data/g02202/versions/4)
 - STAC extensions used:
   - [proj](https://github.com/stac-extensions/projection/)
