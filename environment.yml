@@ -8,3 +8,6 @@ dependencies:
   - conda-forge::rasterio>=1.3
   - conda-forge::sqlite
   - conda-forge::libstdcxx-ng # gdal dependency. Make sure it's from the same channel as gdal
+  - pip:
+    - stactools-noaa-cdr
+
