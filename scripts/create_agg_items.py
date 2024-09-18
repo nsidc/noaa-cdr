@@ -1,8 +1,12 @@
+#!/usr/bin/env python3
+import shutil
+
 from pathlib import Path
 
-from pystac import Item
+from pystac import Collection, Item
 
-from .. import run_command
+import stactools.noaa_cdr.stac
+from stactools.noaa_cdr import stac 
 
 
 def get_url(*, year: str, hemisphere: str, frequency: str) -> str:
@@ -32,30 +36,18 @@ def get_url(*, year: str, hemisphere: str, frequency: str) -> str:
 
 
 def create_item(url: str) -> None:
-    # extract hemisphere from URL
-    if "north" in url:
-        hemi = "north"
-    else:
-        hemi = "south"
+    sea_ice_concentration_item = stac.create_item(url)
 
-    # extract filename from URL
-    f = url.split("/")
-    file = f[(len(f) - 1)]
-    filename = file.split(".")[0]
-    sea_ice_path = Path(
-        f"examples/noaa-cdr-sea-ice-concentration/{hemi}/{filename}.json"
-    )
-    run_command(f"noaa-cdr sea-ice-concentration create-item {url} {sea_ice_path}")
-    Item.from_file(f"{sea_ice_path}")
-
-    # return sea_ice_path
+    return sea_ice_concentration_item
 
 
-# def add_item_to_collection(item_path: str) -> None:
-#     collection_path = 'examples/noaa-cdr-sea-ice-concentration/collection.json'
-#     run_command(f'add {item_path} {collection_path}')
+def add_item_to_collection(item: str) -> None:
+    collection_path = 'examples/noaa-cdr-sea-ice-concentration/collection.json'
+    collection = Collection.from_file(collection_path)
+    collection.add_item(sea_ice_concentration_item)
 
 
 def main(*, year: str, hemisphere: str, frequency: str) -> None:
     url = get_url(year=year, hemisphere=hemisphere, frequency=frequency)
     create_item(url)
+    add_item_to_collection(sea_ice_concentration_item)
