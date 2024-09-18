@@ -66,6 +66,8 @@ def create_item(
             if interval:
                 item.properties[INTERVAL_ATTRIBUTE_NAME] = interval
             item.stac_extensions.append(PROCESSING_EXTENSION_SCHEMA)
+            item.common_metadata.platform = ds.platform
+            item.common_metadata.instruments = [ds.sensor]
             item.properties["processing:level"] = f"L{ds.processing_level[-1]}"
             asset = Asset(
                 href=href,
@@ -75,8 +77,6 @@ def create_item(
                 roles=["data"],
             )
             asset.common_metadata.created = dateutil.parser.parse(ds.date_created)
-            asset.common_metadata.platform = ds.platform
-            asset.common_metadata.instruments = [ds.sensor]
             if "date_modified" in ds.attrs:
                 asset.common_metadata.updated = dateutil.parser.parse(ds.date_modified)
             item.assets[NETCDF_ASSET_KEY] = asset
