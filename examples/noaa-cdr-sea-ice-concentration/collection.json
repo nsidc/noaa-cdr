@@ -506,6 +506,11 @@
       "href": "../catalog.json",
       "type": "application/json",
       "title": "Climate Data Records"
+    },
+    {
+      "rel": "item",
+      "href": "./seaice_conc_daily_nh_2024_v04r00/seaice_conc_daily_nh_2024_v04r00.json",
+      "type": "application/json"
     }
   ],
   "stac_extensions": [

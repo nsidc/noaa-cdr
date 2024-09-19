@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import shutil
+import os
+import os.path
 
 from pathlib import Path
 
@@ -35,19 +37,22 @@ def get_url(*, year: str, hemisphere: str, frequency: str) -> str:
     return url
 
 
-def create_item(url: str) -> None:
-    sea_ice_concentration_item = stac.create_item(url)
+def create_item(url: str) -> Item:
+    item_id = os.path.splitext(os.path.basename(url))[0]
+    print(item_id)
+    sea_ice_concentration_item = stac.create_item(url, item_id)
+    print(type(sea_ice_concentration_item))
 
     return sea_ice_concentration_item
 
 
-def add_item_to_collection(item: str) -> None:
+def add_item_to_collection(item: Item) -> None:
     collection_path = 'examples/noaa-cdr-sea-ice-concentration/collection.json'
     collection = Collection.from_file(collection_path)
-    collection.add_item(sea_ice_concentration_item)
-
+    collection.add_item(item)
+    collection.save()
 
 def main(*, year: str, hemisphere: str, frequency: str) -> None:
     url = get_url(year=year, hemisphere=hemisphere, frequency=frequency)
-    create_item(url)
+    sea_ice_concentration_item = create_item(url)
     add_item_to_collection(sea_ice_concentration_item)
