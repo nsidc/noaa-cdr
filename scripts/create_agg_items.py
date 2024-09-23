@@ -56,3 +56,9 @@ def main(*, year: str, hemisphere: str, frequency: str) -> None:
     url = get_url(year=year, hemisphere=hemisphere, frequency=frequency)
     sea_ice_concentration_item = create_item(url)
     add_item_to_collection(sea_ice_concentration_item)
+    # nsidc file edits
+    # if hemisphere = 'south':
+        # move file out of single file folder into south folder then delete old location
+        # also edit the input in the collection item area
+    # else: # when its north
+    # do all the same things just in the north folder
