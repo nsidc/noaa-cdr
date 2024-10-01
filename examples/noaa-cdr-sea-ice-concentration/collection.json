@@ -33,6 +33,11 @@
     },
     {
       "rel": "item",
+      "href": "./south/seaice_conc_daily_sh_2024_v04r00.json",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
       "href": "./north/seaice_conc_monthly_nh_197811_202403_v04r00.json",
       "type": "application/json"
     },
@@ -501,11 +506,6 @@
       "href": "../catalog.json",
       "type": "application/json",
       "title": "Climate Data Records"
-    },
-    {
-      "rel": "item",
-      "href": "./seaice_conc_daily_nh_2024_v04r00/seaice_conc_daily_nh_2024_v04r00.json",
-      "type": "application/json"
     }
   ],
   "stac_extensions": [
