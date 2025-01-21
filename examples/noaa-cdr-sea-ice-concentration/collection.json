@@ -38,12 +38,12 @@
     },
     {
       "rel": "item",
-      "href": "./north/seaice_conc_monthly_nh_197811_202403_v04r00.json",
+      "href": "./north/seaice_conc_monthly_nh_197811_202406_v04r00.json",
       "type": "application/json"
     },
     {
       "rel": "item",
-      "href": "./south/seaice_conc_monthly_sh_197811_202403_v04r00.json",
+      "href": "./south/seaice_conc_monthly_sh_197811_202406_v04r00.json",
       "type": "application/json"
     },
     {
