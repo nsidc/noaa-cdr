@@ -38,12 +38,12 @@
     },
     {
       "rel": "item",
-      "href": "./north/seaice_conc_monthly_nh_197811_202406_v04r00.json",
+      "href": "./north/seaice_conc_monthly_nh_197811_202412_v04r00.json",
       "type": "application/json"
     },
     {
       "rel": "item",
-      "href": "./south/seaice_conc_monthly_sh_197811_202406_v04r00.json",
+      "href": "./south/seaice_conc_monthly_sh_197811_202412_v04r00.json",
       "type": "application/json"
     },
     {
@@ -494,11 +494,6 @@
     {
       "rel": "item",
       "href": "./north/seaice_conc_daily_nh_1978_v04r00.json",
-      "type": "application/json"
-    },
-    {
-      "rel": "item",
-      "href": "./seaice_conc_daily_nh_20211231_f17_v04r00/seaice_conc_daily_nh_20211231_f17_v04r00.json",
       "type": "application/json"
     },
     {
