@@ -22,7 +22,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Any
+from typing import Any, Iterator
 
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -45,10 +45,13 @@ HEMISPHERES = {
 FILENAME_RE = re.compile(r"^sic_(psn25|pss25)_(\d{8})_[a-z0-9]+_v06r\d+\.nc$")
 
 
-def iter_remote_files(hemisphere: str) -> Iterator[tuple[str, str]]:
-    """Yields (filename, url) for all daily .nc files for one hemisphere.
+def iter_remote_files(
+    hemisphere: str, since: datetime | None = None
+) -> Iterator[tuple[str, str]]:
+    """Yields (filename, url) for daily .nc files for one hemisphere.
 
-    Walks year subdirectories under .../north/daily/ or .../south/daily/.
+    Walks year subdirectories under .../north/daily/ or .../south/daily/,
+    skipping any year that's entirely before `since`.
     """
     token = HEMISPHERES[hemisphere]
     base = f"{BASE_URL}/{hemisphere}/daily"
@@ -57,7 +60,10 @@ def iter_remote_files(hemisphere: str) -> Iterator[tuple[str, str]]:
     resp.raise_for_status()
     years = sorted(set(re.findall(r'href="(\d{4})/"', resp.text)))
 
+    since_year = since.year if since is not None else None
     for year in years:
+        if since_year is not None and int(year) < since_year:
+            continue
         year_url = f"{base}/{year}/"
         resp = requests.get(year_url, timeout=30)
         resp.raise_for_status()
@@ -93,7 +99,7 @@ def find_new_urls(
         since = latest_start_datetime(geoparquet_path)
     new = []
     for hemisphere in HEMISPHERES:
-        for fname, url in iter_remote_files(hemisphere):
+        for fname, url in iter_remote_files(hemisphere, since=since):
             item_id = fname[: -len(".nc")]
             if item_id in known_ids:
                 continue

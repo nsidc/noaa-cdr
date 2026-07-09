@@ -5,7 +5,6 @@ import fsspec
 import numpy
 import rasterio.shutil
 import xarray
-from numpy.typing import NDArray
 from pystac import Asset
 from rasterio import MemoryFile
 
@@ -64,7 +63,7 @@ def cogify(
 
 
 def write(
-    values: NDArray[Any],
+    values: numpy.ndarray,
     path: str,
     profile: BandProfile,
 ) -> None:
