@@ -20,10 +20,12 @@ import logging
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import requests
@@ -93,6 +95,7 @@ def find_new_urls(
     known_ids: set[str],
     geoparquet_path: Path,
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> list[tuple[str, str, str]]:
     """Returns list of (filename, url, hemisphere) for files not yet in the GeoParquet."""
     if since is None:
@@ -104,37 +107,90 @@ def find_new_urls(
             if item_id in known_ids:
                 continue
             m = FILENAME_RE.match(fname)
-            if m and since is not None:
+            if m:
                 file_date = datetime.strptime(m.group(2), "%Y%m%d").replace(
                     tzinfo=timezone.utc
                 )
-                if file_date <= since:
+                if since is not None and file_date <= since:
+                    continue
+                if until is not None and file_date > until:
                     continue
             new.append((fname, url, hemisphere))
     return new
 
 
-def build_items(entries: list[tuple[str, str, str]], download_dir: Path) -> list[Item]:
-    items = []
+DOWNLOAD_RETRIES = 5
+CHECKPOINT_EVERY = 100  # write GeoParquet after every N items
+
+
+def _download(session: requests.Session, url: str, dest: Path) -> None:
+    """Download url to dest, retrying with exponential backoff on failure."""
+    for attempt in range(DOWNLOAD_RETRIES):
+        try:
+            with session.get(url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(dest, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1 << 20):
+                        f.write(chunk)
+            return
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as e:
+            if attempt == DOWNLOAD_RETRIES - 1:
+                raise
+            wait = 2**attempt
+            logger.warning(
+                "Download failed (%s), retrying in %ds (attempt %d/%d)...",
+                e.__class__.__name__,
+                wait,
+                attempt + 1,
+                DOWNLOAD_RETRIES,
+            )
+            time.sleep(wait)
+
+
+def build_items(
+    entries: list[tuple[str, str, str]],
+    download_dir: Path,
+    geoparquet_path: Path,
+) -> int:
+    """Download, build STAC items, and flush to GeoParquet every CHECKPOINT_EVERY items.
+
+    Returns total number of items added.
+    """
+    from stactools.noaa_cdr.constants import NETCDF_ASSET_KEY
+
     session = requests.Session()
+    batch: list[Item] = []
+    total_added = 0
+
     for fname, url, hemisphere in entries:
         local_path = download_dir / fname
         logger.info("Downloading %s", url)
-        with session.get(url, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1 << 20):
-                    f.write(chunk)
+        _download(session, url, local_path)
+
         item = sic_stac.create_item(str(local_path))
         item.properties["noaa_cdr:hemisphere"] = hemisphere
-        # Publish the canonical NSIDC URL, not the local tmp path
-        from stactools.noaa_cdr.constants import NETCDF_ASSET_KEY
-
         item.assets[NETCDF_ASSET_KEY].href = url
-        items.append(item)
+        batch.append(item)
         logger.info("Built item %s (%s)", item.id, hemisphere)
-        local_path.unlink()  # free space immediately after item is built
-    return items
+        local_path.unlink()
+
+        if len(batch) >= CHECKPOINT_EVERY:
+            total_added += write_geoparquet(batch, geoparquet_path)
+            logger.info(
+                "Checkpoint: flushed %d items (%d total so far)",
+                len(batch),
+                total_added,
+            )
+            batch = []
+
+    if batch:
+        total_added += write_geoparquet(batch, geoparquet_path)
+
+    return total_added
 
 
 def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
@@ -146,7 +202,7 @@ def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
     if geoparquet_path.exists():
         existing_table = pq.read_table(geoparquet_path)
         new_table = new_table.cast(existing_table.schema)
-        combined = pq.concat_tables([existing_table, new_table])
+        combined = pa.concat_tables([existing_table, new_table])
     else:
         geoparquet_path.parent.mkdir(parents=True, exist_ok=True)
         combined = new_table
@@ -168,17 +224,25 @@ def main() -> None:
         help="Only ingest files after this date (YYYY-MM-DD). "
         "Defaults to the most recent item already in the GeoParquet.",
     )
+    parser.add_argument(
+        "--until",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc),
+        default=None,
+        help="Only ingest files on or before this date (YYYY-MM-DD). "
+        "Useful for batching a historical backfill year by year.",
+    )
     args = parser.parse_args()
 
     known_ids = existing_item_ids(args.geoparquet)
     logger.info("%d items already in %s", len(known_ids), args.geoparquet)
 
-    entries = find_new_urls(known_ids, args.geoparquet, since=args.since)
+    entries = find_new_urls(
+        known_ids, args.geoparquet, since=args.since, until=args.until
+    )
     logger.info("%d new file(s) found", len(entries))
 
     with tempfile.TemporaryDirectory() as tmp:
-        items = build_items(entries, Path(tmp))
-        added = write_geoparquet(items, args.geoparquet)
+        added = build_items(entries, Path(tmp), args.geoparquet)
 
     logger.info("Added %d new item(s) to %s", added, args.geoparquet)
     print(f"items_added={added}")
