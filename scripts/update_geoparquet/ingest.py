@@ -16,11 +16,11 @@ granules already present in the GeoParquet (by item id) are skipped.
 from __future__ import annotations
 
 import argparse
+import time
 import logging
 import re
 import sys
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -48,12 +48,14 @@ FILENAME_RE = re.compile(r"^sic_(psn25|pss25)_(\d{8})_[a-z0-9]+_v06r\d+\.nc$")
 
 
 def iter_remote_files(
-    hemisphere: str, since: datetime | None = None
+    hemisphere: str,
+    since: datetime | None = None,
+    until: datetime | None = None,
 ) -> Iterator[tuple[str, str]]:
     """Yields (filename, url) for daily .nc files for one hemisphere.
 
     Walks year subdirectories under .../north/daily/ or .../south/daily/,
-    skipping any year that's entirely before `since`.
+    skipping years entirely outside the since/until window.
     """
     token = HEMISPHERES[hemisphere]
     base = f"{BASE_URL}/{hemisphere}/daily"
@@ -63,8 +65,11 @@ def iter_remote_files(
     years = sorted(set(re.findall(r'href="(\d{4})/"', resp.text)))
 
     since_year = since.year if since is not None else None
+    until_year = until.year if until is not None else None
     for year in years:
         if since_year is not None and int(year) < since_year:
+            continue
+        if until_year is not None and int(year) > until_year:
             continue
         year_url = f"{base}/{year}/"
         resp = requests.get(year_url, timeout=30)
@@ -102,7 +107,7 @@ def find_new_urls(
         since = latest_start_datetime(geoparquet_path)
     new = []
     for hemisphere in HEMISPHERES:
-        for fname, url in iter_remote_files(hemisphere, since=since):
+        for fname, url in iter_remote_files(hemisphere, since=since, until=until):
             item_id = fname[: -len(".nc")]
             if item_id in known_ids:
                 continue
@@ -201,8 +206,21 @@ def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
     ).read_all()
     if geoparquet_path.exists():
         existing_table = pq.read_table(geoparquet_path)
-        new_table = new_table.cast(existing_table.schema)
-        combined = pa.concat_tables([existing_table, new_table])
+        # Reconcile column name differences between batches written by
+        # different versions of the projection extension (proj:epsg vs
+        # proj:code). Rename any column in new_table that doesn't exist
+        # in existing_table but has a counterpart there.
+        existing_names = set(existing_table.schema.names)
+        new_names = list(new_table.schema.names)
+        missing_in_new = [n for n in existing_table.schema.names if n not in new_names]
+        extra_in_new = [n for n in new_names if n not in existing_names]
+        for old_name, new_name in zip(extra_in_new, missing_in_new):
+            idx = new_table.schema.get_field_index(old_name)
+            new_names[idx] = new_name
+        new_table = new_table.rename_columns(new_names)
+        combined = pa.concat_tables(
+            [existing_table, new_table], promote_options="default"
+        )
     else:
         geoparquet_path.parent.mkdir(parents=True, exist_ok=True)
         combined = new_table
