@@ -63,7 +63,7 @@ def cogify(
 
 
 def write(
-    values: numpy.ndarray,
+    values: numpy.ndarray[Any, Any],
     path: str,
     profile: BandProfile,
 ) -> None:
