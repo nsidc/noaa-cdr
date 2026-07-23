@@ -1,12 +1,10 @@
-"""Scans the NSIDC HTTPS directory listing for new G02202 V6 daily granules
-(both hemispheres), turns each new one into a STAC item using the
-sea_ice_concentration stactools module, and appends them to a STAC
-GeoParquet file.
+"""Scans the NSIDC HTTPS directory listing for new G02202 V6 daily and
+monthly granules (both hemispheres), turns each into a STAC item using
+the sea_ice_concentration stactools module, and appends them to STAC
+GeoParquet files (one for daily, one for monthly).
 
 Files are publicly accessible at noaadata.apps.nsidc.org with no
-authentication required. We parse the directory listing directly rather
-than going through CMR/earthaccess, which was returning 0 granules for
-this collection even when files are current to within ~7 days.
+authentication required.
 
 Designed to run on a schedule (see
 .github/workflows/update-sea-ice-geoparquet.yml). Re-runs are safe:
@@ -16,11 +14,11 @@ granules already present in the GeoParquet (by item id) are skipped.
 from __future__ import annotations
 
 import argparse
-import time
 import logging
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -43,20 +41,26 @@ HEMISPHERES = {
     "north": "psn25",
     "south": "pss25",
 }
-# Filename pattern: sic_psn25_YYYYMMDD_<sensor>_v06r00.nc
-FILENAME_RE = re.compile(r"^sic_(psn25|pss25)_(\d{8})_[a-z0-9]+_v06r\d+\.nc$")
+# Daily: sic_psn25_YYYYMMDD_<sensor>_v06r00.nc
+DAILY_RE = re.compile(r"^sic_(psn25|pss25)_(\d{8})_[a-z0-9]+_v06r\d+\.nc$")
+# Monthly: sic_psn25_YYYYMM_<sensor>_v06r00.nc
+MONTHLY_RE = re.compile(r"^sic_(psn25|pss25)_(\d{6})_[a-z0-9]+_v06r\d+\.nc$")
+
+DOWNLOAD_RETRIES = 5
+CHECKPOINT_EVERY = 100
 
 
-def iter_remote_files(
+# ---------------------------------------------------------------------------
+# Remote file listing
+# ---------------------------------------------------------------------------
+
+
+def iter_daily_files(
     hemisphere: str,
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> Iterator[tuple[str, str]]:
-    """Yields (filename, url) for daily .nc files for one hemisphere.
-
-    Walks year subdirectories under .../north/daily/ or .../south/daily/,
-    skipping years entirely outside the since/until window.
-    """
+    """Yields (filename, url) for daily files, skipping years outside window."""
     token = HEMISPHERES[hemisphere]
     base = f"{BASE_URL}/{hemisphere}/daily"
 
@@ -79,6 +83,23 @@ def iter_remote_files(
             yield fname, f"{year_url}{fname}"
 
 
+def iter_monthly_files(hemisphere: str) -> Iterator[tuple[str, str]]:
+    """Yields (filename, url) for monthly files (flat directory, no year subdirs)."""
+    token = HEMISPHERES[hemisphere]
+    base = f"{BASE_URL}/{hemisphere}/monthly"
+
+    resp = requests.get(base + "/", timeout=30)
+    resp.raise_for_status()
+    filenames = re.findall(rf'href="(sic_{token}_\d{{6}}_[^"]+\.nc)"', resp.text)
+    for fname in sorted(filenames):
+        yield fname, f"{base}/{fname}"
+
+
+# ---------------------------------------------------------------------------
+# GeoParquet helpers
+# ---------------------------------------------------------------------------
+
+
 def existing_item_ids(geoparquet_path: Path) -> set[str]:
     if not geoparquet_path.exists():
         return set()
@@ -96,36 +117,37 @@ def latest_start_datetime(geoparquet_path: Path) -> Any:
     return pc.max(col).as_py()
 
 
-def find_new_urls(
-    known_ids: set[str],
-    geoparquet_path: Path,
-    since: datetime | None = None,
-    until: datetime | None = None,
-) -> list[tuple[str, str, str]]:
-    """Returns list of (filename, url, hemisphere) for files not yet in the GeoParquet."""
-    if since is None:
-        since = latest_start_datetime(geoparquet_path)
-    new = []
-    for hemisphere in HEMISPHERES:
-        for fname, url in iter_remote_files(hemisphere, since=since, until=until):
-            item_id = fname[: -len(".nc")]
-            if item_id in known_ids:
-                continue
-            m = FILENAME_RE.match(fname)
-            if m:
-                file_date = datetime.strptime(m.group(2), "%Y%m%d").replace(
-                    tzinfo=timezone.utc
-                )
-                if since is not None and file_date <= since:
-                    continue
-                if until is not None and file_date > until:
-                    continue
-            new.append((fname, url, hemisphere))
-    return new
+def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
+    if not items:
+        return 0
+    new_table = stac_geoparquet.parse_stac_items_to_arrow(
+        [item.to_dict() for item in items]
+    ).read_all()
+    if geoparquet_path.exists():
+        existing_table = pq.read_table(geoparquet_path)
+        # Reconcile column name differences between batches (e.g. proj:epsg
+        # vs proj:code across stactools versions).
+        existing_names = set(existing_table.schema.names)
+        new_names = list(new_table.schema.names)
+        missing_in_new = [n for n in existing_table.schema.names if n not in new_names]
+        extra_in_new = [n for n in new_names if n not in existing_names]
+        for old_name, new_name in zip(extra_in_new, missing_in_new):
+            idx = new_table.schema.get_field_index(old_name)
+            new_names[idx] = new_name
+        new_table = new_table.rename_columns(new_names)
+        combined = pa.concat_tables(
+            [existing_table, new_table], promote_options="default"
+        )
+    else:
+        geoparquet_path.parent.mkdir(parents=True, exist_ok=True)
+        combined = new_table
+    stac_geoparquet.to_parquet(combined, geoparquet_path)
+    return len(items)
 
 
-DOWNLOAD_RETRIES = 5
-CHECKPOINT_EVERY = 100  # write GeoParquet after every N items
+# ---------------------------------------------------------------------------
+# Download + item building
+# ---------------------------------------------------------------------------
 
 
 def _download(session: requests.Session, url: str, dest: Path) -> None:
@@ -161,7 +183,7 @@ def build_items(
     download_dir: Path,
     geoparquet_path: Path,
 ) -> int:
-    """Download, build STAC items, and flush to GeoParquet every CHECKPOINT_EVERY items.
+    """Download, build STAC items, flush to GeoParquet every CHECKPOINT_EVERY items.
 
     Returns total number of items added.
     """
@@ -198,72 +220,122 @@ def build_items(
     return total_added
 
 
-def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
-    if not items:
-        return 0
-    new_table = stac_geoparquet.parse_stac_items_to_arrow(
-        [item.to_dict() for item in items]
-    ).read_all()
-    if geoparquet_path.exists():
-        existing_table = pq.read_table(geoparquet_path)
-        # Reconcile column name differences between batches written by
-        # different versions of the projection extension (proj:epsg vs
-        # proj:code). Rename any column in new_table that doesn't exist
-        # in existing_table but has a counterpart there.
-        existing_names = set(existing_table.schema.names)
-        new_names = list(new_table.schema.names)
-        missing_in_new = [n for n in existing_table.schema.names if n not in new_names]
-        extra_in_new = [n for n in new_names if n not in existing_names]
-        for old_name, new_name in zip(extra_in_new, missing_in_new):
-            idx = new_table.schema.get_field_index(old_name)
-            new_names[idx] = new_name
-        new_table = new_table.rename_columns(new_names)
-        combined = pa.concat_tables(
-            [existing_table, new_table], promote_options="default"
-        )
-    else:
-        geoparquet_path.parent.mkdir(parents=True, exist_ok=True)
-        combined = new_table
-    stac_geoparquet.to_parquet(combined, geoparquet_path)
-    return len(items)
+# ---------------------------------------------------------------------------
+# Daily ingestion
+# ---------------------------------------------------------------------------
+
+
+def ingest_daily(
+    geoparquet_path: Path,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> int:
+    known_ids = existing_item_ids(geoparquet_path)
+    logger.info("%d daily items already in %s", len(known_ids), geoparquet_path)
+
+    if since is None:
+        since = latest_start_datetime(geoparquet_path)
+
+    entries = []
+    for hemisphere in HEMISPHERES:
+        for fname, url in iter_daily_files(hemisphere, since=since, until=until):
+            item_id = fname[: -len(".nc")]
+            if item_id in known_ids:
+                continue
+            m = DAILY_RE.match(fname)
+            if m:
+                file_date = datetime.strptime(m.group(2), "%Y%m%d").replace(
+                    tzinfo=timezone.utc
+                )
+                if since is not None and file_date <= since:
+                    continue
+                if until is not None and file_date > until:
+                    continue
+            entries.append((fname, url, hemisphere))
+
+    logger.info("%d new daily file(s) found", len(entries))
+    with tempfile.TemporaryDirectory() as tmp:
+        added = build_items(entries, Path(tmp), geoparquet_path)
+    logger.info("Added %d new daily item(s)", added)
+    return added
+
+
+# ---------------------------------------------------------------------------
+# Monthly ingestion
+# ---------------------------------------------------------------------------
+
+
+def ingest_monthly(geoparquet_path: Path) -> int:
+    known_ids = existing_item_ids(geoparquet_path)
+    logger.info("%d monthly items already in %s", len(known_ids), geoparquet_path)
+
+    entries = []
+    for hemisphere in HEMISPHERES:
+        for fname, url in iter_monthly_files(hemisphere):
+            item_id = fname[: -len(".nc")]
+            if item_id in known_ids:
+                continue
+            entries.append((fname, url, hemisphere))
+
+    logger.info("%d new monthly file(s) found", len(entries))
+    with tempfile.TemporaryDirectory() as tmp:
+        added = build_items(entries, Path(tmp), geoparquet_path)
+    logger.info("Added %d new monthly item(s)", added)
+    return added
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--geoparquet",
+        "--mode",
+        choices=["daily", "monthly", "both"],
+        default="daily",
+        help="Which granule type to ingest (default: daily).",
+    )
+    parser.add_argument(
+        "--daily-geoparquet",
         type=Path,
-        default=Path("data/sea-ice-concentration-items.parquet"),
+        default=Path(
+            "stac/sea-ice-concentration/sea-ice-concentration-daily-items.parquet"
+        ),
+    )
+    parser.add_argument(
+        "--monthly-geoparquet",
+        type=Path,
+        default=Path(
+            "stac/sea-ice-concentration/sea-ice-concentration-monthly-items.parquet"
+        ),
     )
     parser.add_argument(
         "--since",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc),
         default=None,
-        help="Only ingest files after this date (YYYY-MM-DD). "
-        "Defaults to the most recent item already in the GeoParquet.",
+        help="(daily only) Only ingest files after this date (YYYY-MM-DD).",
     )
     parser.add_argument(
         "--until",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc),
         default=None,
-        help="Only ingest files on or before this date (YYYY-MM-DD). "
-        "Useful for batching a historical backfill year by year.",
+        help="(daily only) Only ingest files on or before this date (YYYY-MM-DD).",
     )
     args = parser.parse_args()
 
-    known_ids = existing_item_ids(args.geoparquet)
-    logger.info("%d items already in %s", len(known_ids), args.geoparquet)
+    daily_added = 0
+    monthly_added = 0
 
-    entries = find_new_urls(
-        known_ids, args.geoparquet, since=args.since, until=args.until
-    )
-    logger.info("%d new file(s) found", len(entries))
+    if args.mode in ("daily", "both"):
+        daily_added = ingest_daily(args.daily_geoparquet, args.since, args.until)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        added = build_items(entries, Path(tmp), args.geoparquet)
+    if args.mode in ("monthly", "both"):
+        monthly_added = ingest_monthly(args.monthly_geoparquet)
 
-    logger.info("Added %d new item(s) to %s", added, args.geoparquet)
-    print(f"items_added={added}")
+    print(f"daily_added={daily_added}")
+    print(f"monthly_added={monthly_added}")
 
 
 if __name__ == "__main__":
