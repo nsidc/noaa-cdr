@@ -30,7 +30,8 @@
   - [Sea surface temperature - WHOI](examples/noaa-cdr-sea-surface-temperature-whoi/collection.json)
 - Items
   - [Ocean heat content, yearly for 2021, 2000m depth](examples/noaa-cdr-ocean-heat-content/ocean-heat-content-2021-2000m/ocean-heat-content-2021-2000m.json)
-  - [Sea ice concentration, daily, northern hemisphere](examples/noaa-cdr-sea-ice-concentration/seaice_conc_daily_nh_20211231_f17_v04r00/seaice_conc_daily_nh_20211231_f17_v04r00.json)
+- [Sea ice concentration, daily, northern hemisphere](examples/noaa-cdr-sea-ice-concentration/
+  sic_psn25_19850130_n07_v06r00/sic_psn25_19850130_n07_v06r00.json)
   - [Sea surface temperature - optimum interpolation](examples/noaa-cdr-sea-surface-temperature-optimum-interpolation/oisst-avhrr-v02r01.20220913/oisst-avhrr-v02r01.20220913.json)
   - [Sea surface temperature - WHOI](examples/noaa-cdr-sea-surface-temperature-whoi/SEAFLUX-OSB-CDR_V02R00_SST_D20210831_C20211223-0/SEAFLUX-OSB-CDR_V02R00_SST_D20210831_C20211223-0.json)
 
@@ -114,14 +115,14 @@ To create an item for sea-ice-concentration (without COGS):
 
 ```sh
 stac noaa-cdr sea-ice-concentration create-item
- https://noaadata.apps.nsidc.org/NOAA/G02202_V4/north/daily/2023/seaice_conc_daily_nh_20230203_f17_v04r00.nc
- noaa-cdr-sea-ice-concentration/north/seaice_conc_daily_nh_20230203_f17_v04r00.json
+ https://noaadata.apps.nsidc.org/NOAA/G02202_V6/north/daily/2026/sic_psn25_20260101_am2_v06r00.nc
+ noaa-cdr-sea-ice-concentration/north/sic_psn25_20260101_am2_v06r00.json
 ```
 
 To add an item to a catalog:
 
 ```sh
-stac add examples/noaa-cdr-sea-ice-concentration/north/seaice_conc_daily_20230203_f17_v0400.json
+stac add examples/noaa-cdr-sea-ice-concentration/north/sic_psn25_20260101_am2_v06r00.json
  examples/noaa-cdr-sea-ice-concentration/collection.json
 ```
 
@@ -151,7 +152,8 @@ To run the tests:
 pytest
 ```
 
-Many tests are skipped by default because access external data, which makes them slow and a bit flakey.
+Many tests are skipped by default because access external data,  
+which makes them slow and a bit flakey.
 To run these tests:
 
 ```shell
@@ -173,4 +175,20 @@ Additionally, there is a script to create the `examples/` directory:
 
 ```sh
 scripts/create_examples.py
+```
+
+## Sea Ice Concentration GeoParquet
+
+A STAC GeoParquet catalog for G02202 V6 is available at:
+
+- Daily items: `https://noaadata.apps.nsidc.org/NOAA/G02202_V6/stac/sea-ice-concentration/sea-ice-concentration-daily-items.parquet`
+- Monthly items: `https://noaadata.apps.nsidc.org/NOAA/G02202_V6/stac/sea-ice-concentration/sea-ice-concentration-monthly-items.parquet`
+
+To update the GeoParquet locally:
+
+```shell
+pip install -r scripts/update_geoparquet/requirements.txt
+python scripts/update_geoparquet/ingest.py --mode daily
+python scripts/update_geoparquet/ingest.py --mode monthly
+python scripts/update_geoparquet/generate_catalog.py
 ```
