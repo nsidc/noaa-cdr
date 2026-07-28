@@ -2,10 +2,19 @@ name: Update sea ice concentration GeoParquet
 
 on:
   schedule:
-    # Once daily. Files at noaadata.apps.nsidc.org lag ~7 days behind
-    # present, so don't expect new rows every single day.
+    # Daily job: runs every day at 13:17 UTC
     - cron: "17 13 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to ingest"
+        required: true
+        default: "daily"
+        type: choice
+        options:
+          - daily
+          - monthly
+          - both
 
 permissions:
   contents: write
@@ -25,19 +34,35 @@ jobs:
           pip install -e .
           pip install -r scripts/update_geoparquet/requirements.txt
 
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "$(date +%d)" = "07" ]; then
+            echo "mode=both" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=daily" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run ingestion
         id: ingest
         run: |
           python scripts/update_geoparquet/ingest.py \
-            --geoparquet stac/sea-ice-concentration/sea-ice-concentration-daily-items.parquet \
+            --mode ${{ steps.mode.outputs.mode }} \
             | tee ingest_output.txt
-          echo "items_added=$(grep -o 'items_added=[0-9]*' ingest_output.txt | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "daily_added=$(grep -o 'daily_added=[0-9]*' ingest_output.txt | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "monthly_added=$(grep -o 'monthly_added=[0-9]*' ingest_output.txt | cut -d= -f2)" >> "$GITHUB_OUTPUT"
 
-      - name: Commit updated GeoParquet
-        if: steps.ingest.outputs.items_added != '0'
+      - name: Regenerate catalog JSON
+        if: steps.ingest.outputs.daily_added != '0' || steps.ingest.outputs.monthly_added != '0'
+        run: python scripts/update_geoparquet/generate_catalog.py
+
+      - name: Commit updated files
+        if: steps.ingest.outputs.daily_added != '0' || steps.ingest.outputs.monthly_added != '0'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add stac/sea-ice-concentration/sea-ice-concentration-daily-items.parquet
-          git commit -m "Add ${{ steps.ingest.outputs.items_added }} new sea ice concentration item(s)"
+          git add stac/
+          git commit -m "Add ${{ steps.ingest.outputs.daily_added }} daily and ${{ steps.ingest.outputs.monthly_added }} monthly sea ice item(s)"
           git push
