@@ -66,9 +66,3 @@ jobs:
           git add stac/
           git commit -m "Add ${{ steps.ingest.outputs.daily_added }} daily and ${{ steps.ingest.outputs.monthly_added }} monthly sea ice item(s)"
           git push
-
-      - name: Trigger Jenkins sync
-        if: steps.ingest.outputs.daily_added != '0' || steps.ingest.outputs.monthly_added != '0'
-        run: |
-          curl -X POST \
-            "https://ci.jenkins-ops.apps.int.nsidc.org/job/NOAA-sea-ice-cdr-stac/build?token=${{ secrets.JENKINS_TOKEN }}"
