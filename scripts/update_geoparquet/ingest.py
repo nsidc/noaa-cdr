@@ -135,6 +135,31 @@ def write_geoparquet(items: list[Item], geoparquet_path: Path) -> int:
             idx = new_table.schema.get_field_index(old_name)
             new_names[idx] = new_name
         new_table = new_table.rename_columns(new_names)
+        # Cast new_table to the existing schema to resolve type mismatches,
+        # e.g. timestamp[us, tz=UTC] vs timestamp[us] across pyarrow versions.
+        try:
+            new_table = new_table.cast(existing_table.schema)
+        except (pa.lib.ArrowInvalid, pa.lib.ArrowTypeError):
+            new_cols = []
+            for i, field in enumerate(existing_table.schema):
+                col = (
+                    new_table.column(field.name)
+                    if field.name in new_table.schema.names
+                    else None
+                )
+                if col is not None:
+                    try:
+                        new_cols.append(col.cast(field.type))
+                    except Exception:
+                        new_cols.append(col)
+                else:
+                    new_cols.append(pa.nulls(len(new_table), type=field.type))
+            new_table = pa.table(
+                {
+                    field.name: new_cols[i]
+                    for i, field in enumerate(existing_table.schema)
+                }
+            )
         combined = pa.concat_tables(
             [existing_table, new_table], promote_options="default"
         )
