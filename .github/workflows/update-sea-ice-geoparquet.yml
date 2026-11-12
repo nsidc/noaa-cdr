@@ -3,7 +3,8 @@ name: Update sea ice concentration GeoParquet
 on:
   schedule:
     # Daily job: runs every day at 13:17 UTC
-    - cron: "17 13 * * *"
+    # updating to 8:17 UTC because git has been slow
+    - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       mode:
